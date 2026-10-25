@@ -1,7 +1,7 @@
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { twoFactor } from "better-auth/plugins";
-import { getBindings, getDb } from "./db";
+import { getBindings, getD1, getDb } from "./db";
 import { ensureMigrated } from "./migrations";
 import { isEmailConfigured, emailSignOff, sendEmail } from "./email";
 import {
@@ -73,7 +73,7 @@ function authOptions(): BetterAuthOptions {
     baseURL,
     basePath: "/api/auth",
     database: drizzleAdapter(getDb(), {
-      provider: "sqlite",
+      provider: "pg",
       schema: { user, session, account, verification, twoFactor: twoFactorTable },
     }),
     emailAndPassword: {
@@ -226,25 +226,22 @@ function authOptions(): BetterAuthOptions {
   };
 }
 
-let cached: { db: D1Database; auth: ReturnType<typeof betterAuth> } | null =
-  null;
+let cachedAuth: ReturnType<typeof betterAuth> | null = null;
 
 export function getAuth() {
-  const db = getBindings().DB;
-  if (!db) {
-    throw new Error("The D1 binding named DB is missing.");
+  // The database handle is a process-wide pool, so the auth instance only
+  // needs to be built once.
+  if (!cachedAuth) {
+    cachedAuth = betterAuth(authOptions());
   }
-  if (!cached || cached.db !== db) {
-    cached = { db, auth: betterAuth(authOptions()) };
-  }
-  return cached.auth;
+  return cachedAuth;
 }
 
 /** Reads the signed-in user on the server, or null. */
 export async function getSessionUser(): Promise<SessionUser | null> {
   // Every server page and action starts here, so this is the choke point that
-  // guarantees the schema exists before any query runs (once per isolate).
-  await ensureMigrated(getBindings().DB);
+  // guarantees the schema exists before any query runs (once per process).
+  await ensureMigrated(getD1());
   const { headers } = await import("next/headers");
   const session = await getAuth().api.getSession({
     headers: await headers(),

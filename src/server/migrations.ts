@@ -1,31 +1,31 @@
 import { migrations } from "./migration-sql";
+import type { SqlDb } from "./db";
 
 /**
- * Server-side schema migrations.
+ * Server-side schema migrations, applied at runtime against Postgres.
  *
- * Freebuff Sites has no SQL console, so the hosted D1 database is migrated by
- * this routine running inside the Worker against the `DB` binding. It is:
+ * The routine runs inside the app (health check, auth, first server query)
+ * rather than as a deploy step, and it is:
  *
  * - **Ledgered:** applied migration ids are recorded in `schema_migrations`,
  *   so each migration runs at most once per database.
- * - **Repeat-safe:** statements are normalised to `IF NOT EXISTS`, and the two
- *   error classes a re-run can still produce ("already exists", "duplicate
- *   column") are tolerated. This matters for the local database, which has the
- *   full schema but no ledger: its first run back-fills the ledger without
- *   failing.
- * - **Cached per isolate:** a WeakSet keyed on the binding object means the
- *   ledger is read once per isolate, not on every request.
+ * - **Repeat-safe:** statements are normalised to `IF NOT EXISTS`, and the
+ *   error class a re-run can still produce ("already exists") is tolerated.
+ *   This matters for a local database that has the full schema but no ledger:
+ *   its first run back-fills the ledger without failing.
+ * - **Cached per handle:** a WeakSet keyed on the database handle means the
+ *   ledger is read once per process, not on every request.
  *
- * Ordering follows `drizzle/meta/_journal.json`: 0000 → 0001 → 0002 → 0003.
+ * Ordering follows `drizzle/meta/_journal.json`.
  */
 
 const LEDGER_TABLE = `create table if not exists schema_migrations (
   id text primary key,
-  applied_at integer not null
+  applied_at bigint not null
 )`;
 
-const ran = new WeakSet<D1Database>();
-const inFlight = new WeakMap<D1Database, Promise<void>>();
+const ran = new WeakSet<SqlDb>();
+const inFlight = new WeakMap<SqlDb, Promise<void>>();
 
 /** Matches errors that only a harmless re-run of an already-applied statement produces. */
 function isAlreadyApplied(message: string) {
@@ -36,15 +36,19 @@ function isAlreadyApplied(message: string) {
   );
 }
 
-/** Drizzle files use plain CREATE; SQLite also accepts the IF NOT EXISTS form. */
+/**
+ * Drizzle files use plain CREATE; Postgres also accepts the IF NOT EXISTS form.
+ * The match is anchored on the keyword rather than the start of the string,
+ * because a statement can begin with the file's leading comments.
+ */
 function makeIdempotent(statement: string) {
   return statement
-    .replace(/^CREATE TABLE /i, "CREATE TABLE IF NOT EXISTS ")
-    .replace(/^CREATE UNIQUE INDEX /i, "CREATE UNIQUE INDEX IF NOT EXISTS ")
-    .replace(/^CREATE INDEX /i, "CREATE INDEX IF NOT EXISTS ");
+    .replace(/\bCREATE UNIQUE INDEX\b/i, "CREATE UNIQUE INDEX IF NOT EXISTS")
+    .replace(/\bCREATE INDEX\b/i, "CREATE INDEX IF NOT EXISTS")
+    .replace(/\bCREATE TABLE\b/i, "CREATE TABLE IF NOT EXISTS");
 }
 
-async function migrateOnce(db: D1Database): Promise<void> {
+async function migrateOnce(db: SqlDb): Promise<void> {
   await db.prepare(LEDGER_TABLE).run();
 
   const { results } = await db
@@ -82,10 +86,10 @@ async function migrateOnce(db: D1Database): Promise<void> {
 }
 
 /**
- * Applies any pending migrations through `db`, once per isolate per binding.
+ * Applies any pending migrations through `db`, once per process per handle.
  * Safe to call from any request path; concurrent callers share one run.
  */
-export function ensureMigrated(db: D1Database): Promise<void> {
+export function ensureMigrated(db: SqlDb): Promise<void> {
   if (ran.has(db)) return Promise.resolve();
   let pending = inFlight.get(db);
   if (!pending) {
@@ -102,12 +106,12 @@ export function ensureMigrated(db: D1Database): Promise<void> {
 }
 
 /** How many migrations the ledger has recorded (for health reporting). */
-export async function migrationStatus(db: D1Database) {
+export async function migrationStatus(db: SqlDb) {
   try {
     const row = await db
       .prepare(`select count(*) as total from schema_migrations`)
       .first<{ total: number }>();
-    return { applied: row?.total ?? 0, expected: migrations.length };
+    return { applied: Number(row?.total ?? 0), expected: migrations.length };
   } catch {
     // The ledger table does not exist yet: nothing has been applied.
     return { applied: 0, expected: migrations.length };

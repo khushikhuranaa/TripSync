@@ -1,1 +1,0 @@
-ALTER TABLE `trips` ADD `traveller_count` integer;

@@ -60,7 +60,7 @@ export async function loadInvitationPreview(
               (select count(*) from trip_members m where m.trip_id = t.id) as member_count
        from trip_invitations i
        join trips t on t.id = i.trip_id
-       join user u on u.id = i.inviter_id
+       join "user" u on u.id = i.inviter_id
        where i.token = ?`,
     )
     .bind(token)

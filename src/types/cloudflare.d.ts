@@ -1,11 +1,13 @@
 /**
- * Type declarations for the bindings this project reads from the Worker
- * environment. Values marked optional are configuration the app checks for at
- * runtime and reports honestly when missing; they are never invented.
+ * Type declarations for the server environment this project reads (`.dev.vars`
+ * locally and through OpenNext's dev context; plain `process.env` on Render).
+ * Values marked optional are configuration the app checks for at runtime and
+ * reports honestly when missing; they are never invented.
  */
 declare global {
   interface CloudflareEnv {
-    DB: D1Database;
+    /** Supabase Postgres connection string (pooling, port 6543). */
+    DATABASE_URL?: string;
     BETTER_AUTH_SECRET?: string;
     BETTER_AUTH_URL?: string;
     AI_PROVIDER?: string;

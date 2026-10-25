@@ -63,7 +63,7 @@ export const templateNotes: TripNote[] = sampleNotes.filter(
 /**
  * Copy the example trip into the signed-in user's account.
  *
- * The inserts are sent to D1 as one atomic batch, so a failure leaves no
+ * The inserts are sent as one atomic transaction, so a failure leaves no
  * half-copied trip behind. The copy is independent: editing it never touches
  * the curated template.
  */
@@ -152,7 +152,7 @@ export async function copyTemplateForUser(
           item.category,
           item.notes ?? null,
           item.quantity,
-          item.packed ? 1 : 0,
+          item.packed,
           index,
           userId,
           now,

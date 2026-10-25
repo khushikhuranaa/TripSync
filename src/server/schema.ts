@@ -1,35 +1,48 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
+  customType,
   index,
   integer,
-  sqliteTable,
+  pgTable,
   text,
   uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+} from "drizzle-orm/pg-core";
 
 /**
- * Database schema for the whole application.
+ * Database schema for the whole application (Supabase Postgres).
  *
- * SQLite (Cloudflare D1) has no enum or decimal type, so:
  * - every money amount is stored as an integer number of paise (minor units)
  *   and only converted to rupees when it reaches the interface;
- * - fixed sets of values are validated in `src/server/validation.ts` and
- *   reinforced with SQL check constraints where practical.
+ * - fixed sets of values are validated in `src/server/validation.ts`.
  *
  * The four `user`/`session`/`account`/`verification` tables are the ones the
  * Better Auth library owns. `role` and the profile fields are extra columns
  * this app reads; only the server can change `role`.
  */
 
+/**
+ * Timestamps: epoch milliseconds stored in a bigint column — the same layout
+ * the original SQLite schema used — exposed to Drizzle and Better Auth as a
+ * `Date`. Keeping the storage format identical is what lets every raw
+ * parameterised statement in the app bind and read plain numbers, unchanged.
+ */
+const msDate = customType<{ data: Date; driverData: number }>({
+  dataType: () => "bigint",
+  toDriver: (value) =>
+    value instanceof Date ? value.getTime() : Number(value),
+  fromDriver: (value) => new Date(Number(value)),
+});
+
 // ---------------------------------------------------------------------------
 // Authentication and profiles (Better Auth + app profile fields)
 // ---------------------------------------------------------------------------
 
-export const user = sqliteTable("user", {
+export const user = pgTable("user", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
-  emailVerified: integer("email_verified", { mode: "boolean" })
+  emailVerified: boolean("email_verified")
     .notNull()
     .default(false),
   image: text("image"),
@@ -40,25 +53,23 @@ export const user = sqliteTable("user", {
   /** JSON object of in-app notification switches; empty means all enabled. */
   notificationPrefs: text("notification_prefs").notNull().default(""),
   /** When the first-run tour was completed or skipped. Null means show it. */
-  onboardingCompletedAt: integer("onboarding_completed_at", {
-    mode: "timestamp_ms",
-  }),
+  onboardingCompletedAt: msDate("onboarding_completed_at"),
   /** Set by the Better Auth two-factor plugin once TOTP is confirmed. */
-  twoFactorEnabled: integer("two_factor_enabled", { mode: "boolean" })
+  twoFactorEnabled: boolean("two_factor_enabled")
     .notNull()
     .default(false),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  createdAt: msDate("created_at").notNull(),
+  updatedAt: msDate("updated_at").notNull(),
 });
 
-export const session = sqliteTable(
+export const session = pgTable(
   "session",
   {
     id: text("id").primaryKey(),
-    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    expiresAt: msDate("expires_at").notNull(),
     token: text("token").notNull().unique(),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: msDate("created_at").notNull(),
+    updatedAt: msDate("updated_at").notNull(),
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
     userId: text("user_id")
@@ -68,7 +79,7 @@ export const session = sqliteTable(
   (table) => [index("session_user_idx").on(table.userId)],
 );
 
-export const account = sqliteTable(
+export const account = pgTable(
   "account",
   {
     id: text("id").primaryKey(),
@@ -80,29 +91,25 @@ export const account = sqliteTable(
     accessToken: text("access_token"),
     refreshToken: text("refresh_token"),
     idToken: text("id_token"),
-    accessTokenExpiresAt: integer("access_token_expires_at", {
-      mode: "timestamp_ms",
-    }),
-    refreshTokenExpiresAt: integer("refresh_token_expires_at", {
-      mode: "timestamp_ms",
-    }),
+    accessTokenExpiresAt: msDate("access_token_expires_at"),
+    refreshTokenExpiresAt: msDate("refresh_token_expires_at"),
     scope: text("scope"),
     password: text("password"),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: msDate("created_at").notNull(),
+    updatedAt: msDate("updated_at").notNull(),
   },
   (table) => [index("account_user_idx").on(table.userId)],
 );
 
-export const verification = sqliteTable(
+export const verification = pgTable(
   "verification",
   {
     id: text("id").primaryKey(),
     identifier: text("identifier").notNull(),
     value: text("value").notNull(),
-    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    expiresAt: msDate("expires_at").notNull(),
+    createdAt: msDate("created_at").notNull(),
+    updatedAt: msDate("updated_at").notNull(),
   },
   (table) => [index("verification_identifier_idx").on(table.identifier)],
 );
@@ -111,7 +118,7 @@ export const verification = sqliteTable(
 // Trips and membership
 // ---------------------------------------------------------------------------
 
-export const trips = sqliteTable(
+export const trips = pgTable(
   "trips",
   {
     id: text("id").primaryKey(),
@@ -130,8 +137,8 @@ export const trips = sqliteTable(
     currency: text("currency").notNull().default("INR"),
     coverImage: text("cover_image").notNull().default(""),
     coverAlt: text("cover_alt").notNull().default(""),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: msDate("created_at").notNull(),
+    updatedAt: msDate("updated_at").notNull(),
   },
   (table) => [
     index("trips_owner_idx").on(table.ownerId),
@@ -139,7 +146,7 @@ export const trips = sqliteTable(
   ],
 );
 
-export const tripMembers = sqliteTable(
+export const tripMembers = pgTable(
   "trip_members",
   {
     id: text("id").primaryKey(),
@@ -150,7 +157,7 @@ export const tripMembers = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     role: text("role").notNull().default("editor"),
-    joinedAt: integer("joined_at", { mode: "timestamp_ms" }).notNull(),
+    joinedAt: msDate("joined_at").notNull(),
   },
   (table) => [
     uniqueIndex("trip_members_trip_user_idx").on(table.tripId, table.userId),
@@ -158,7 +165,7 @@ export const tripMembers = sqliteTable(
   ],
 );
 
-export const tripInvitations = sqliteTable(
+export const tripInvitations = pgTable(
   "trip_invitations",
   {
     id: text("id").primaryKey(),
@@ -176,9 +183,9 @@ export const tripInvitations = sqliteTable(
     role: text("role").notNull().default("editor"),
     token: text("token").notNull().unique(),
     status: text("status").notNull().default("pending"),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
-    respondedAt: integer("responded_at", { mode: "timestamp_ms" }),
+    createdAt: msDate("created_at").notNull(),
+    expiresAt: msDate("expires_at").notNull(),
+    respondedAt: msDate("responded_at"),
   },
   (table) => [
     index("invitations_email_idx").on(table.inviteeEmail),
@@ -190,7 +197,7 @@ export const tripInvitations = sqliteTable(
 // Itinerary
 // ---------------------------------------------------------------------------
 
-export const itineraryItems = sqliteTable(
+export const itineraryItems = pgTable(
   "itinerary_items",
   {
     id: text("id").primaryKey(),
@@ -214,8 +221,8 @@ export const itineraryItems = sqliteTable(
     createdBy: text("created_by")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: msDate("created_at").notNull(),
+    updatedAt: msDate("updated_at").notNull(),
   },
   (table) => [index("itinerary_trip_day_idx").on(table.tripId, table.dayDate)],
 );
@@ -224,7 +231,7 @@ export const itineraryItems = sqliteTable(
 // Expenses and equal splits
 // ---------------------------------------------------------------------------
 
-export const expenses = sqliteTable(
+export const expenses = pgTable(
   "expenses",
   {
     id: text("id").primaryKey(),
@@ -243,13 +250,13 @@ export const expenses = sqliteTable(
     createdBy: text("created_by")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: msDate("created_at").notNull(),
+    updatedAt: msDate("updated_at").notNull(),
   },
   (table) => [index("expenses_trip_idx").on(table.tripId)],
 );
 
-export const expenseSplits = sqliteTable(
+export const expenseSplits = pgTable(
   "expense_splits",
   {
     id: text("id").primaryKey(),
@@ -274,7 +281,7 @@ export const expenseSplits = sqliteTable(
 // Polls
 // ---------------------------------------------------------------------------
 
-export const polls = sqliteTable(
+export const polls = pgTable(
   "polls",
   {
     id: text("id").primaryKey(),
@@ -286,14 +293,14 @@ export const polls = sqliteTable(
     createdBy: text("created_by")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    closesAt: integer("closes_at", { mode: "timestamp_ms" }),
+    closesAt: msDate("closes_at"),
     status: text("status").notNull().default("open"),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: msDate("created_at").notNull(),
   },
   (table) => [index("polls_trip_idx").on(table.tripId)],
 );
 
-export const pollOptions = sqliteTable(
+export const pollOptions = pgTable(
   "poll_options",
   {
     id: text("id").primaryKey(),
@@ -306,7 +313,7 @@ export const pollOptions = sqliteTable(
   (table) => [index("poll_options_poll_idx").on(table.pollId)],
 );
 
-export const pollVotes = sqliteTable(
+export const pollVotes = pgTable(
   "poll_votes",
   {
     id: text("id").primaryKey(),
@@ -319,7 +326,7 @@ export const pollVotes = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: msDate("created_at").notNull(),
   },
   (table) => [
     // One vote per member per poll, enforced by the database itself.
@@ -332,7 +339,7 @@ export const pollVotes = sqliteTable(
 // Packing list and notes
 // ---------------------------------------------------------------------------
 
-export const packingItems = sqliteTable(
+export const packingItems = pgTable(
   "packing_items",
   {
     id: text("id").primaryKey(),
@@ -346,17 +353,17 @@ export const packingItems = sqliteTable(
     assignedTo: text("assigned_to").references(() => user.id, {
       onDelete: "set null",
     }),
-    packed: integer("packed", { mode: "boolean" }).notNull().default(false),
+    packed: boolean("packed").notNull().default(false),
     sortOrder: integer("sort_order").notNull().default(0),
     createdBy: text("created_by")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: msDate("created_at").notNull(),
   },
   (table) => [index("packing_trip_idx").on(table.tripId)],
 );
 
-export const tripNotes = sqliteTable(
+export const tripNotes = pgTable(
   "trip_notes",
   {
     id: text("id").primaryKey(),
@@ -369,8 +376,8 @@ export const tripNotes = sqliteTable(
     title: text("title").notNull(),
     body: text("body").notNull(),
     category: text("category").notNull().default("General"),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: msDate("created_at").notNull(),
+    updatedAt: msDate("updated_at").notNull(),
   },
   (table) => [index("notes_trip_idx").on(table.tripId)],
 );
@@ -379,7 +386,7 @@ export const tripNotes = sqliteTable(
 // Feedback and notifications
 // ---------------------------------------------------------------------------
 
-export const feedback = sqliteTable(
+export const feedback = pgTable(
   "feedback",
   {
     id: text("id").primaryKey(),
@@ -388,12 +395,12 @@ export const feedback = sqliteTable(
       .references(() => user.id, { onDelete: "cascade" }),
     rating: integer("rating").notNull(),
     message: text("message").notNull().default(""),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: msDate("created_at").notNull(),
   },
   (table) => [index("feedback_user_idx").on(table.userId)],
 );
 
-export const notifications = sqliteTable(
+export const notifications = pgTable(
   "notifications",
   {
     id: text("id").primaryKey(),
@@ -404,8 +411,8 @@ export const notifications = sqliteTable(
     title: text("title").notNull(),
     body: text("body").notNull().default(""),
     href: text("href"),
-    readAt: integer("read_at", { mode: "timestamp_ms" }),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    readAt: msDate("read_at"),
+    createdAt: msDate("created_at").notNull(),
   },
   (table) => [index("notifications_user_idx").on(table.userId)],
 );
@@ -419,7 +426,7 @@ export const notifications = sqliteTable(
  * codes never leave the server: Better Auth marks both `returned: false`, and
  * every read path in this app goes through Better Auth rather than raw SQL.
  */
-export const twoFactor = sqliteTable(
+export const twoFactor = pgTable(
   "two_factor",
   {
     id: text("id").primaryKey(),
@@ -428,11 +435,11 @@ export const twoFactor = sqliteTable(
       .references(() => user.id, { onDelete: "cascade" }),
     secret: text("secret").notNull(),
     backupCodes: text("backup_codes").notNull(),
-    verified: integer("verified", { mode: "boolean" }).notNull().default(true),
+    verified: boolean("verified").notNull().default(true),
     failedVerificationCount: integer("failed_verification_count")
       .notNull()
       .default(0),
-    lockedUntil: integer("locked_until", { mode: "timestamp_ms" }),
+    lockedUntil: msDate("locked_until"),
   },
   (table) => [
     index("two_factor_secret_idx").on(table.secret),
@@ -448,7 +455,7 @@ export const twoFactor = sqliteTable(
  * Append-only record of privileged actions. Only platform admins can trigger
  * the actions that write here, and nothing in the app updates or deletes rows.
  */
-export const adminAuditLog = sqliteTable(
+export const adminAuditLog = pgTable(
   "admin_audit_log",
   {
     id: text("id").primaryKey(),
@@ -456,7 +463,7 @@ export const adminAuditLog = sqliteTable(
     action: text("action").notNull(),
     targetId: text("target_id"),
     detail: text("detail").notNull().default(""),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: msDate("created_at").notNull(),
   },
   (table) => [index("admin_audit_actor_idx").on(table.actorId)],
 );
@@ -473,7 +480,7 @@ export const adminAuditLog = sqliteTable(
  * feed inside the trip's lifetime, and a removed member's rows survive with a
  * null actor because the event itself is still true.
  */
-export const tripActivity = sqliteTable(
+export const tripActivity = pgTable(
   "trip_activity",
   {
     id: text("id").primaryKey(),
@@ -486,7 +493,7 @@ export const tripActivity = sqliteTable(
     /** Short machine kind, e.g. `trip.created` or `expense.added`. */
     kind: text("kind").notNull(),
     summary: text("summary").notNull(),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: msDate("created_at").notNull(),
   },
   (table) => [
     index("trip_activity_trip_idx").on(table.tripId, table.createdAt),
@@ -494,9 +501,9 @@ export const tripActivity = sqliteTable(
 );
 
 /** Used by a trigger-free "is there at least one account?" bootstrap check. */
-export const schemaReady = sqliteTable("schema_ready", {
+export const schemaReady = pgTable("schema_ready", {
   id: integer("id").primaryKey(),
-  appliedAt: integer("applied_at", { mode: "timestamp_ms" })
+  appliedAt: msDate("applied_at")
     .notNull()
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`),
+    .default(sql`(extract(epoch from clock_timestamp()) * 1000)::bigint`),
 });

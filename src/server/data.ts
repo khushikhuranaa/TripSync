@@ -155,7 +155,7 @@ type PackingRow = {
   notes: string | null;
   quantity: number;
   assigned_to: string | null;
-  packed: number;
+  packed: boolean;
 };
 
 type NoteRow = {
@@ -228,7 +228,7 @@ async function membersByTrip(ids: string[]): Promise<Map<string, MemberRow[]>> {
     const placeholders = chunk.map(() => "?").join(", ");
     const rows = await all<MemberRow>(
       `select m.trip_id, m.user_id, m.role, u.name, u.email
-       from trip_members m join user u on u.id = m.user_id
+       from trip_members m join "user" u on u.id = m.user_id
        where m.trip_id in (${placeholders})
        order by case m.role when 'owner' then 0 when 'editor' then 1 else 2 end, u.name`,
       ...chunk,
@@ -300,7 +300,7 @@ async function activityByTrip(ids: string[]): Promise<Map<string, TripActivity[]
       created_at: number;
     }>(
       `select a.id, a.trip_id, a.kind, a.summary, u.name as actor_name, a.created_at
-       from trip_activity a left join user u on u.id = a.actor_id
+       from trip_activity a left join "user" u on u.id = a.actor_id
        where a.trip_id in (${placeholders})
        order by a.created_at desc`,
       ...chunk,
@@ -358,7 +358,7 @@ const INVITATION_SELECT = `
          t.start_date, t.end_date,
          (select count(*) from trip_members m where m.trip_id = t.id) as member_count
   from trip_invitations i
-  join user u on u.id = i.inviter_id
+  join "user" u on u.id = i.inviter_id
   join trips t on t.id = i.trip_id
 `;
 
@@ -415,14 +415,14 @@ async function loadAdminData(user: UserRow) {
             u.dietary_notes, u.notification_prefs, u.onboarding_completed_at,
             u.created_at,
             (select count(*) from trip_members m where m.user_id = u.id) as trip_count
-     from user u order by u.created_at asc`,
+     from "user" u order by u.created_at asc`,
   );
 
   const feedback = await all<
     FeedbackRow & { author_name: string; author_email: string }
   >(
     `select f.id, f.rating, f.message, f.created_at, u.name as author_name, u.email as author_email
-     from feedback f join user u on u.id = f.user_id
+     from feedback f join "user" u on u.id = f.user_id
      order by f.created_at desc limit 200`,
   );
 
@@ -464,7 +464,7 @@ export async function loadWorkspace(userId: string): Promise<WorkspaceState> {
   const user = await one<UserRow>(
     `select id, name, email, role, home_city, travel_style, dietary_notes,
             notification_prefs, onboarding_completed_at, created_at
-     from user where id = ?`,
+     from "user" where id = ?`,
     userId,
   );
   if (!user) {
@@ -611,7 +611,7 @@ export async function loadWorkspace(userId: string): Promise<WorkspaceState> {
         tripId: row.trip_id,
         name: row.name,
         quantity: row.quantity,
-        packed: row.packed === 1,
+        packed: row.packed,
         assignedTo: row.assigned_to ?? undefined,
         category: row.category as PackingItem["category"],
         notes: row.notes ?? undefined,
@@ -692,6 +692,6 @@ export { loadNotificationsBefore };
 
 /** The user's stored email, used for invitation matching. */
 export async function getUserEmail(userId: string) {
-  const row = await one<{ email: string }>(`select email from user where id = ?`, userId);
+  const row = await one<{ email: string }>(`select email from "user" where id = ?`, userId);
   return row?.email ?? null;
 }

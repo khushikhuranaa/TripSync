@@ -1,12 +1,10 @@
 import type { NextConfig } from "next";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
-// Makes the D1 database declared in freebuff.wrangler.jsonc available to
-// `next dev` (through the same bindings the deployed Worker uses).
-// Dev only: `next build` and `next start` must run as plain Node (that is how
-// Render serves the site), so they never start Wrangler or a local workerd —
-// on those runtimes the app falls back to the SQLite binding in
-// `src/server/node-db.ts` instead.
+// Makes the variables in `.dev.vars` (DATABASE_URL and every server secret)
+// available to `next dev` through the same env object the deployed runtime
+// reads. Dev only: `next build` and `next start` run as plain Node — that is
+// how Render serves the site — and read `process.env` directly.
 if (process.env.NODE_ENV === "development") {
   initOpenNextCloudflareForDev({ configPath: "./freebuff.wrangler.jsonc" });
 }
@@ -14,10 +12,9 @@ if (process.env.NODE_ENV === "development") {
 const nextConfig: NextConfig = {
   // Keep the development overlay out of the design preview screenshots.
   devIndicators: false,
-  // better-sqlite3 is a native Node addon used by the plain-Node (Render)
-  // database binding; it must be required from node_modules at runtime, never
-  // bundled into the server build.
-  serverExternalPackages: ["better-sqlite3"],
+  // `pg` resolves its own optional addons at runtime, so it must be required
+  // from node_modules instead of being bundled into the server build.
+  serverExternalPackages: ["pg"],
   // The Phase 1 photographs are already sized and compressed, so they are
   // served as-is. This also keeps deployment simple on Workers hosting.
   images: {

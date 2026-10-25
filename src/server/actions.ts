@@ -172,7 +172,7 @@ async function notifyUsers(
   const placeholders = candidates.map(() => "?").join(", ");
   const { results } = await db
     .prepare(
-      `select id, notification_prefs from user where id in (${placeholders})`,
+      `select id, notification_prefs from "user" where id in (${placeholders})`,
     )
     .bind(...candidates)
     .all<{ id: string; notification_prefs: string }>();
@@ -242,7 +242,7 @@ async function emailEvent(
 ) {
   if (!isEmailConfigured()) return;
   const target = await getD1()
-    .prepare(`select email, notification_prefs from user where id = ?`)
+    .prepare(`select email, notification_prefs from "user" where id = ?`)
     .bind(userId)
     .first<{ email: string; notification_prefs: string }>();
   if (!target) return;
@@ -1279,7 +1279,7 @@ export async function addPackingItemAction(
     await getD1()
       .prepare(
         `insert into packing_items (id, trip_id, name, category, notes, quantity, assigned_to, packed, sort_order, created_by, created_at)
-         values (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`,
+         values (?, ?, ?, ?, ?, ?, ?, false, 0, ?, ?)`,
       )
       .bind(
         crypto.randomUUID(),
@@ -1342,7 +1342,7 @@ export async function togglePackingItemAction(itemId: string): Promise<ActionRes
     const tripId = await tripIdForChild("packing_items", itemId);
     await requireTripRole(user.id, tripId, [...EDITOR_ROLES]);
     await getD1()
-      .prepare(`update packing_items set packed = case packed when 1 then 0 else 1 end where id = ? and trip_id = ?`)
+      .prepare(`update packing_items set packed = not packed where id = ? and trip_id = ?`)
       .bind(itemId, tripId)
       .run();
     return await done(user.id);
@@ -1484,7 +1484,7 @@ export async function updateProfileAction(input: unknown): Promise<ActionResult>
     const values = profileSchema.parse(input);
     await getD1()
       .prepare(
-        `update user set name = ?, home_city = ?, travel_style = ?, dietary_notes = ?, updated_at = ?
+        `update "user" set name = ?, home_city = ?, travel_style = ?, dietary_notes = ?, updated_at = ?
          where id = ?`,
       )
       .bind(
@@ -1510,7 +1510,7 @@ export async function updateNotificationPreferencesAction(
     const values = notificationPreferencesSchema.parse(input);
     await getD1()
       .prepare(
-        `update user set notification_prefs = ?, updated_at = ? where id = ?`,
+        `update "user" set notification_prefs = ?, updated_at = ? where id = ?`,
       )
       .bind(serializeNotificationPreferences(values), Date.now(), user.id)
       .run();
@@ -1526,7 +1526,7 @@ export async function completeOnboardingAction(): Promise<ActionResult> {
     const user = await currentUser();
     await getD1()
       .prepare(
-        `update user set onboarding_completed_at = coalesce(onboarding_completed_at, ?) where id = ?`,
+        `update "user" set onboarding_completed_at = coalesce(onboarding_completed_at, ?) where id = ?`,
       )
       .bind(Date.now(), user.id)
       .run();
@@ -1541,7 +1541,7 @@ export async function restartOnboardingAction(): Promise<ActionResult> {
   try {
     const user = await currentUser();
     await getD1()
-      .prepare(`update user set onboarding_completed_at = null where id = ?`)
+      .prepare(`update "user" set onboarding_completed_at = null where id = ?`)
       .bind(user.id)
       .run();
     return await done(user.id, "The tour will appear on your dashboard.");
@@ -1561,12 +1561,12 @@ export async function setUserRoleAction(input: unknown): Promise<ActionResult> {
       throw new TripAccessError("You cannot remove your own admin access.");
     }
     const target = await getD1()
-      .prepare(`select id from user where id = ?`)
+      .prepare(`select id from "user" where id = ?`)
       .bind(values.userId)
       .first<{ id: string }>();
     if (!target) throw new TripAccessError("That account no longer exists.");
     await getD1()
-      .prepare(`update user set role = ?, updated_at = ? where id = ?`)
+      .prepare(`update "user" set role = ?, updated_at = ? where id = ?`)
       .bind(values.role, Date.now(), values.userId)
       .run();
     await audit(user.id, "role.change", values.userId, `role=${values.role}`);
@@ -1594,7 +1594,7 @@ export async function sendInvitationAction(input: unknown): Promise<ActionResult
 
     const existingMember = await getD1()
       .prepare(
-        `select m.id from trip_members m join user u on u.id = m.user_id
+        `select m.id from trip_members m join "user" u on u.id = m.user_id
          where m.trip_id = ? and lower(u.email) = ?`,
       )
       .bind(values.tripId, email)
@@ -1615,7 +1615,7 @@ export async function sendInvitationAction(input: unknown): Promise<ActionResult
     }
 
     const invitee = await getD1()
-      .prepare(`select id, name from user where lower(email) = ?`)
+      .prepare(`select id, name from "user" where lower(email) = ?`)
       .bind(email)
       .first<{ id: string; name: string }>();
 
@@ -1920,7 +1920,7 @@ export async function updateMemberRoleAction(input: unknown): Promise<ActionResu
     const db = getD1();
     const membership = await db
       .prepare(
-        `select m.role, u.name from trip_members m join user u on u.id = m.user_id
+        `select m.role, u.name from trip_members m join "user" u on u.id = m.user_id
          where m.trip_id = ? and m.user_id = ?`,
       )
       .bind(values.tripId, values.userId)
@@ -1998,7 +1998,7 @@ export async function removeMemberAction(input: unknown): Promise<ActionResult> 
     const db = getD1();
     const membership = await db
       .prepare(
-        `select m.role, u.name from trip_members m join user u on u.id = m.user_id
+        `select m.role, u.name from trip_members m join "user" u on u.id = m.user_id
          where m.trip_id = ? and m.user_id = ?`,
       )
       .bind(values.tripId, values.userId)
@@ -2198,7 +2198,7 @@ export async function deleteAccountAction(
     // deleting the account must not be a side door around that rule.
     if (user.role === "admin") {
       const otherAdmin = await getD1()
-        .prepare(`select id from user where role = 'admin' and id != ? limit 1`)
+        .prepare(`select id from "user" where role = 'admin' and id != ? limit 1`)
         .bind(user.id)
         .first<{ id: string }>();
       if (!otherAdmin) {
@@ -2215,7 +2215,7 @@ export async function deleteAccountAction(
     if (user.role === "admin") {
       await audit(user.id, "account.delete", user.id, "self-deleted admin account");
     }
-    await getD1().prepare(`delete from user where id = ?`).bind(user.id).run();
+    await getD1().prepare(`delete from "user" where id = ?`).bind(user.id).run();
     return { ok: true };
   } catch (error) {
     if (error instanceof z.ZodError) return { ok: false, error: firstIssue(error) };

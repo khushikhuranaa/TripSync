@@ -2,9 +2,9 @@
 
 A collaborative trip-planning platform with an AI-assisted daily itinerary planner.
 
-**Current stage: full-stack workspace on D1.** Sign-up, sign-in, sessions and
+**Current stage: full-stack workspace on Postgres.** Sign-up, sign-in, sessions and
 every workspace screen are connected to the real backend: the protected layout
-loads the signed-in user's rows from Cloudflare D1 on the server, and every change
+loads the signed-in user's rows from Postgres (Supabase) on the server, and every change
 (trips, itinerary, expenses, polls, packing, notes, invitations, profile, admin,
 feedback) goes through a validated server action with per-trip role checks. Data
 lives in the database, so it survives refreshes, sign-out/sign-in and other
@@ -48,7 +48,7 @@ each of those is labelled in the interface.
   Food, Contacts, General, Other); edits are version-checked and deletion is
   limited to the author or the trip owner.
 - All of the above is persisted with role checks, and viewers only read.
-- Collaboration: `owner`, `editor` and `viewer` memberships stored in D1; owners
+- Collaboration: `owner`, `editor` and `viewer` memberships stored in Postgres; owners
   manage members (change role, remove, withdraw a pending invitation) from the trip
   page, and viewers get a read-only itinerary.
 - Invitations: send with a chosen role, accept, decline, revoke, expire; every
@@ -107,16 +107,16 @@ Unsupported actions say so honestly: no action pretends to have saved.
 
 | Layer | Choice | Status |
 | --- | --- | --- |
-| Database | Cloudflare D1 (SQLite) with Drizzle ORM | Every screen reads and writes D1; migrations in `drizzle/` |
+| Database | Postgres (Supabase) with Drizzle ORM | Every screen reads and writes Postgres; migrations in `drizzle/` |
 | Authentication | Better Auth (email + password, server sessions) | Sign-up, sign-in, sign-out and reset screens live; preview layout enforces the session |
 | Validation | Zod on the server, mirroring the form rules | Applied inside every server action |
 | Authorisation | Membership and role checks per trip | Enforced server-side on every read and write |
 | AI provider | Any OpenAI-compatible chat-completions API | Full server route (trip, day and activity scopes) verified end-to-end against a local OpenAI-compatible mock over real HTTP; a live provider call still needs `AI_API_KEY` |
 | Email | Resend HTTP API | Adapter written; no key configured, falls back to share links |
-| Deployment | Cloudflare Workers through the OpenNext adapter | Production build passes; a preview environment exists but does not yet have a D1 binding attached (see section 11) |
+| Deployment | Render (Node web service) | The live site runs at https://tripsync-lo3f.onrender.com; `next build` and `npm start` run on plain Node |
 
-> D1 replaced the earlier Supabase plan. The project already runs on Cloudflare
-> Workers through the Freebuff hosting adapter, so D1 keeps the database next to
+> The database moved from Cloudflare Postgres to Supabase Postgres so the owner can
+> inspect and manage rows in a dashboard, and so data survives every redeploy
 > the application instead of adding a second external service.
 
 ---
@@ -296,7 +296,7 @@ every mutation is a server action that returns the fresh workspace afterwards.
 
 | Area | Implementation |
 | --- | --- |
-| Database | Cloudflare D1 (SQLite) through Drizzle ORM; migrations in `drizzle/` (`0000_init`, `0001_flowery_polaris`, `0002_flaky_barracuda`, `0003_brief_pyro`) |
+| Database | Postgres (Supabase) through Drizzle ORM; one migration in `drizzle/0000_init.sql`, applied by the app-side runner on first request |
 | Tables | `user`, `session`, `account`, `verification`, `trips`, `trip_members`, `trip_invitations`, `itinerary_items`, `expenses`, `expense_splits`, `polls`, `poll_options`, `poll_votes`, `packing_items`, `trip_notes`, `feedback`, `notifications` |
 | Authentication | Better Auth with email and password: scrypt hashing, HTTP-only session cookies, password change and reset code paths |
 | Validation | Zod schemas in `src/server/validation.ts`, applied inside every server action |
@@ -304,18 +304,18 @@ every mutation is a server action that returns the fresh workspace afterwards.
 | Mutations | Server actions in `src/server/actions.ts` covering trips, itinerary, expenses, polls, packing, notes, invitations, profile, admin, feedback, notifications and account security |
 | Reads | `loadWorkspace()` in `src/server/data.ts` returns only rows the signed-in person may see |
 | Example trip | Curated in code; `copyTemplateForUser()` copies it into an account as one atomic batch |
-| AI generation | `POST /api/ai/itinerary`: session check, trip access check, Zod validation, provider call, response normalisation. Three operations share the route via `scope`: `trip` (draft), `day` (replace one day) and `activity` (replace one slot). Saving goes through `addDraftItemsAction` (append) or `replaceDraftDaysAction` (atomic D1 batch replace) |
+| AI generation | `POST /api/ai/itinerary`: session check, trip access check, Zod validation, provider call, response normalisation. Three operations share the route via `scope`: `trip` (draft), `day` (replace one day) and `activity` (replace one slot). Saving goes through `addDraftItemsAction` (append) or `replaceDraftDaysAction` (atomic transaction replace) |
 | Email | Resend adapter used for invitations and password reset when configured; otherwise the app reports that email is unavailable |
 | Money | `src/lib/money.ts` is the single source of currency maths: amounts convert to paise, splits and balances use integer minor units, and `suggestSettlements()` only computes transfers. `/expenses` never sends a total to the server. |
 | Poll lifecycle | `polls.status` is `open`/`closed`; a passed `closes_at` reads as `expired`. Votes are upserted on the unique `(poll_id, user_id)` index, so a member can change a vote but never create two. |
 | Note versions | `updateNoteAction` requires the `updatedAt` the form was opened with and updates with `where updated_at = ?`, so a newer save is reported as a conflict instead of being overwritten. |
-| Itinerary ordering | `itinerary_items.sort_order` (existing column) stores the position inside a day; a move re-numbers that day as `0..n-1` in one D1 batch. New activities are appended with `max(sort_order) + 1`, and the itinerary reads `order by day_date, sort_order, start_time` |
+| Itinerary ordering | `itinerary_items.sort_order` (existing column) stores the position inside a day; a move re-numbers that day as `0..n-1` in one transaction. New activities are appended with `max(sort_order) + 1`, and the itinerary reads `order by day_date, sort_order, start_time` |
 | Invitation links | `src/server/invitations.ts` loads a public-safe preview by token; `acceptInvitationTokenAction` / `declineInvitationTokenAction` re-check status, expiry and the signed-in email, then write membership and invitation status in one batch |
 | Membership management | `updateMemberRoleAction`, `removeMemberAction` and `revokeInvitationAction` are owner-only; the owner row cannot be demoted or removed, and access ends on the next request because membership is read per request |
 
 ### In beginner-friendly terms
 
-- **D1** is the database. It lives next to the application on Cloudflare, so there
+- **Postgres** is the database. It lives next to the application on Cloudflare, so there
   is no separate database server to manage. Foreign keys, unique indexes and check
   constraints are the real safety net.
 - **Better Auth** is the login desk. It hashes passwords and issues an HTTP-only
@@ -345,7 +345,7 @@ every mutation is a server action that returns the fresh workspace afterwards.
 
 - No AI or email key is configured, so those integrations report "not configured"
   rather than pretending to work.
-- The hosted preview environment does not have a D1 binding attached yet, so the
+- The hosted preview environment does not have a DATABASE_URL attached yet, so the
   deployed URL still runs the previous build (see section 11).
 
 ## 9. Environment variables
@@ -355,7 +355,7 @@ these, but the server routes and database access do. Never commit real values.
 
 | Variable | Used by | Exposure |
 | --- | --- | --- |
-| `DB` | D1 binding declared in `freebuff.wrangler.jsonc` | Server only (a binding, not a password) |
+| `DATABASE_URL` | Supabase pooler connection string | Server only (never reaches the browser) |
 | `BETTER_AUTH_SECRET` | Session cookie signing | **Server only** |
 | `BETTER_AUTH_URL` | Exact public origin for auth redirects | Server configuration |
 | `AI_API_KEY` | Provider call in `/api/ai/itinerary` | **Server only** |
@@ -430,7 +430,7 @@ Either way the sender in `EMAIL_FROM` must be verified with that provider.
     redirected to sign-in.
   - Delete with confirmation → trip disappears from My Trips and the dashboard
     counts drop, with cascade removal verified at the SQL level.
-- Direct D1 inspection confirms the rows (budget in paise, `traveller_count`,
+- Direct Postgres inspection confirms the rows (budget in paise, `traveller_count`,
   renamed/edited values, activity rows) independently of the UI.
 
 ### Itinerary and collaboration suite (current stage)
@@ -452,13 +452,13 @@ Either way the sender in `EMAIL_FROM` must be verified with that provider.
   - **Acceptance:** opening a link while signed out shows only the trip name, dates,
     destination, inviter and role; the wrong signed-in account cannot accept;
     the invited account accepts and lands on the trip; accepting twice is refused
-    and D1 shows exactly one membership row.
+    and the database shows exactly one membership row.
   - **Roles:** an editor can add an activity and its change is visible to the owner
     after refetch; the editor cannot open member management; after the owner demotes
     them to viewer, a still-open tab's write is refused by the server (`Viewers can
     read this trip but cannot change it`) and stores nothing; after a reload the
     add and reorder controls are gone.
-  - **Membership changes:** role changes are verified in D1, removing a member
+  - **Membership changes:** role changes are verified in Postgres, removing a member
     deletes their membership and their next trip request is refused, withdrawing a
     pending invitation marks it revoked and the link grants nothing.
   - **Privacy:** a non-member sees none of the trip or itinerary at the trip URL.
@@ -468,7 +468,7 @@ Either way the sender in `EMAIL_FROM` must be verified with that provider.
 - Expenses/budget suite (Chrome/Playwright, three real members): **26/26 checks
   passed**, no console or page errors — expense create with note, three-way
   paise split (`333.34 for 1 · 333.33 for 2`), totals/remaining/percentage from
-  saved rows, stored shares summing to the amount in D1, an expense dated outside
+  saved rows, stored shares summing to the amount in Postgres, an expense dated outside
   the trip refused by the server with nothing stored, edit to a two-way split,
   viewer read-only, delete confirmation and recalculation, over-budget amount and
   105% of budget, and a trip with no budget showing “Not set” with no division by
@@ -488,7 +488,7 @@ Either way the sender in `EMAIL_FROM` must be verified with that provider.
 
 ### Profile, notifications, onboarding, feedback and demo-copy suite (current stage)
 
-- New browser suite with three real accounts (Chrome/Playwright) plus direct D1
+- New browser suite with three real accounts (Chrome/Playwright) plus direct Postgres
   inspection: **42/42 checks passed, zero console errors, zero page errors**:
   - **Onboarding:** a fresh account sees the six-step tour, "Skip tour" removes it
     and it stays gone after a full refresh; the profile page's "Replay tour"
@@ -502,7 +502,7 @@ Either way the sender in `EMAIL_FROM` must be verified with that provider.
     within a minute is refused server-side with "just saved" instead of writing a
     duplicate.
   - **Demo trip:** `/preview/trips/goa` is viewable before any trip exists, is
-    labelled read-only, offers "Create my own copy", and D1 shows **zero** rows for
+    labelled read-only, offers "Create my own copy", and the database shows **zero** rows for
     the demo (`trips`, `itinerary_items`, `expenses`, `polls` counts all 0) — the
     sample lives only in code. The copy creates a new trip id with an owner
     membership plus 13 itinerary items, 3 notes, 9 packing items, 2 polls / 24 poll
@@ -574,7 +574,7 @@ in `.dev.vars`. **42/42 browser checks passed, zero unexpected console errors**,
 | Regenerate one activity | Current vs alternative comparison; accepting changes only that item |
 | Save approved (9 items) | Rows written to `itinerary_items` (costs in paise), visible on the itinerary page immediately |
 | Reload after save | Items still there (server-rendered workspace) |
-| Save when days already have activities | Confirmation dialog with "Add alongside" / "Replace" / "Cancel"; replace is one atomic D1 batch |
+| Save when days already have activities | Confirmation dialog with "Add alongside" / "Replace" / "Cancel"; replace is one atomic transaction |
 | Saving to another user's trip | `404` (identical message for missing and foreign trips) |
 | Sign-in required | `401` without a session |
 | Provider throttle (`AI_MAX_ATTEMPTS=3`) | `[200, 200, 200, 429, 429]` |
@@ -606,7 +606,7 @@ verify your provider; the UI will report the outcome honestly either way.
   refresh or after their own action returns the fresh workspace; there are no
   websocket subscriptions. Concurrency is last-write-wins per row, and a reorder
   re-numbers the day in one batch so order never ends up duplicated.
-- The hosted preview URL runs the previous build and has **no D1 binding** on its
+- The hosted preview URL runs the previous build and has **no DATABASE_URL** on its
   environment; local development is the verified path. Publishing this work needs
   the storage binding, the migrations and a redeploy (section 13).
 - No Git repository initialized.
@@ -622,7 +622,7 @@ verify your provider; the UI will report the outcome honestly either way.
 
 **Decisions taken**
 
-1. **Backend/auth:** Cloudflare D1 + Better Auth with server-side-only checks,
+1. **Backend/auth:** Cloudflare Postgres + Better Auth with server-side-only checks,
    matching the Workers hosting already in use.
 2. **Invitations:** email address plus role, stored with a 256-bit token and a
    14-day expiry. The token is kept in the row (not hashed) because the owner must
@@ -634,7 +634,7 @@ verify your provider; the UI will report the outcome honestly either way.
 4. **Currency:** INR as the fixed MVP currency; no conversion.
 5. **Admin bootstrap:** the first admin is assigned with a trusted SQL update on
    the `user` table — `update user set role='admin' where email='you@example.com';`
-   run against the deployment's D1 database; after that, admins can promote users
+   run against the deployment's Postgres database; after that, admins can promote users
    from the admin page (server-enforced). `/preview/admin` is a server component
    that redirects every non-admin before any admin markup renders, and `loadWorkspace`
    only selects users, trips and feedback rows for accounts whose stored role is
@@ -654,7 +654,7 @@ itineraries.
 
 ## 13. Next step
 
-1. **Publish the full-stack build:** attach a D1 binding (`DB`) to the site's
+1. **Publish the full-stack build:** attach a DATABASE_URL (`DB`) to the site's
    preview environment, apply `drizzle/0000_init.sql`, `drizzle/0001_flowery_polaris.sql`,
    `drizzle/0002_flaky_barracuda.sql` and `drizzle/0003_brief_pyro.sql`
    to that database, then deploy and publish. Until then the hosted URL keeps
@@ -674,14 +674,14 @@ No feature above is claimed to work until those tests pass.
 
 ## 14. Authentication and account security
 
-Implemented on top of Better Auth + D1 (tables `user`, `session`, `account`,
+Implemented on top of Better Auth + Postgres (tables `user`, `session`, `account`,
 `verification`, `two_factor`; all created by the migration runner in
 `src/server/migrations.ts`, currently 5 migrations / 24 tables).
 
 | Concern | How it works | Where |
 | --- | --- | --- |
 | Password hashing | scrypt via Better Auth; the app never stores or logs a password | `src/server/auth.ts` |
-| Session | 30-day HTTP-only, `SameSite=Lax` cookie; the row is re-read from D1 on every request, so deleting a session ends access immediately | `auth.ts`, `getSessionUser()` |
+| Session | 30-day HTTP-only, `SameSite=Lax` cookie; the row is re-read from Postgres on every request, so deleting a session ends access immediately | `auth.ts`, `getSessionUser()` |
 | Email confirmation | One-hour, single-use token. Enforced **only when a mail provider is configured** (`requireEmailVerification`); otherwise the workspace stays open and `/verify-email` says email is unavailable | `auth.ts`, `app/verify-email` |
 | Password reset | Provider-backed link, one hour, single use; invalid/expired/used tokens are refused by the server and reported in the UI | `auth.ts`, `components/auth/reset-password-form.tsx` |
 | Password change | Requires the current password and revokes the account's other sessions | `changePasswordAction` |
@@ -696,7 +696,7 @@ are not mocked): `AI_API_KEY` + `AI_MODEL` for live itinerary generation, and
 `RESEND_API_KEY` + `EMAIL_FROM` for confirmation/reset/invitation mail. Turning on
 the mail keys also turns on email verification and blocks unconfirmed accounts.
 The first platform admin is still assigned with a trusted SQL update on the
-deployment's D1 (section 11, decision 5).
+deployment's Postgres (section 11, decision 5).
 
 ---
 
@@ -760,26 +760,19 @@ substituted.
 
 ## 16. Deploying to Render
 
-The app runs in two runtime modes with one codebase:
-
-- **Cloudflare Workers** — real D1 binding (Freebuff Sites / Wrangler), as before.
-- **Plain Node** — when no Workers context exists (`next start` on Render),
-  the `DB` binding falls back to a SQLite file through
-  `src/server/node-db.ts`, a small wrapper implementing the same D1 API over
-  `better-sqlite3`. Schema, migrations and queries are identical because both
-  engines are SQLite.
+The database is Supabase Postgres, and the app is a plain Node server on Render
+(`npm run build` → `npm start`). There is no second runtime to keep in sync:
+`src/server/db.ts` opens one `pg` pool from `DATABASE_URL` and exposes it two
+ways — a Drizzle instance for Better Auth, and a D1-shaped facade (`prepare` →
+`bind` → `run` / `all` / `first` / `batch`) for the app's parameterised SQL.
+Timestamps stay bigint epoch-milliseconds, so every statement binds and reads
+plain numbers exactly as it did before the move.
 
 ### One-time: push to GitHub
 
-Render deploys from a Git repository, and this project is not yet a repo:
-
-```bash
-git init
-git add .
-git commit -m "TripSync initial commit"
-git remote add origin <your-github-url>
-git push -u origin main
-```
+Render deploys from a Git repository — this project lives at
+https://github.com/khushikhuranaa/TripSync. A push to `main` triggers a
+redeploy.
 
 Keep `.dev.vars`, `.env` and `data/` out of the repo (they are already covered
 by `.gitignore` — verify before pushing).
@@ -791,7 +784,7 @@ by `.gitignore` — verify before pushing).
 | Runtime | Web Service (Node) |
 | Build command | `npm install && npm run build` |
 | Start command | `npm start` |
-| Node version | 20 or newer (better-sqlite3 prebuilds) |
+| Node version | 20 or newer |
 
 ### Environment variables (Render → Environment)
 
@@ -799,7 +792,7 @@ by `.gitignore` — verify before pushing).
 | --- | --- | --- |
 | `BETTER_AUTH_SECRET` | yes | `openssl rand -base64 32`; signs session cookies |
 | `BETTER_AUTH_URL` | yes | exact public origin, e.g. `https://tripsync.onrender.com` |
-| `DATABASE_PATH` | recommended | e.g. `/data/tripsync.sqlite` on a Render persistent disk |
+| `DATABASE_URL` | **yes** | Supabase → Connect → Connection pooling (Transaction, port 6543) URI, password included |
 | `AI_PROVIDER`, `AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY` | for AI planner | any OpenAI-compatible endpoint; `AI_MODEL` must be a **live** model id (Gemini retires ids — `gemini-2.0-flash` died 1 June 2026 and makes every draft 404); unset = planner reports "not configured" |
 | `AI_TIMEOUT_MS`, `AI_MAX_ATTEMPTS` | optional | provider timeout / per-user throttle overrides |
 | `EMAIL_PROVIDER`, `RESEND_API_KEY`, `EMAIL_FROM` | recommended | Resend (default): needs a verified **domain**. Real email + **mandatory verification** for password sign-ups; unset = invitations fall back to share links |
@@ -807,10 +800,12 @@ by `.gitignore` — verify before pushing).
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | for Google login | OAuth client with redirect URI `https://<your-domain>/api/auth/callback/google`; unset = button hidden |
 | `ADMIN_EMAIL` | optional | seed admin address (see section 11) |
 
-Without a persistent disk the SQLite file is wiped on every redeploy. On a
-paid Render instance add a Disk mounted at `/data` and set
-`DATABASE_PATH=/data/tripsync.sqlite`. On the free instance data survives
-until the next deploy — fine for demos, not for real users.
+Supabase keeps the rows, so a redeploy never loses them. In the Supabase
+dashboard: **Connect → Connection pooling → Transaction** (port 6543 — the
+direct 5432 connection is IPv6-only and Render cannot reach it), replace the
+password placeholder, and use that URI locally in `.dev.vars` and on Render.
+The **Table Editor** and **SQL Editor** show and edit the same tables the app
+writes.
 
 Migrations run automatically: `/api/health` (the Render health-check path) and
 every server page call `ensureMigrated` before querying, so a fresh database

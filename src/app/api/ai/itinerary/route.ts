@@ -479,6 +479,15 @@ async function requestDraft(
         "The AI provider rejected the server key. Check AI_API_KEY before trying again.",
       );
     }
+    if (response.status === 404) {
+      // Providers answer 404 for a model id that no longer exists. Gemini
+      // retires model ids on a schedule, so this is the most likely cause
+      // after a deployment has been running for a while.
+      throw new AiRequestError(
+        503,
+        "The AI provider does not know that model. Check AI_MODEL (retired model ids fail here) and AI_BASE_URL, then try again.",
+      );
+    }
     if (response.status === 400) {
       // The provider refused our payload shape; the request itself is at fault.
       throw new AiRequestError(

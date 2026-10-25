@@ -359,7 +359,7 @@ these, but the server routes and database access do. Never commit real values.
 | `BETTER_AUTH_SECRET` | Session cookie signing | **Server only** |
 | `BETTER_AUTH_URL` | Exact public origin for auth redirects | Server configuration |
 | `AI_API_KEY` | Provider call in `/api/ai/itinerary` | **Server only** |
-| `AI_BASE_URL` | OpenAI-compatible endpoint; defaults to `https://api.openai.com/v1` | Server configuration |
+| `AI_BASE_URL` | OpenAI-compatible endpoint; set it explicitly on the host | Server configuration |
 | `AI_MODEL` | Model name used for drafts | Server configuration |
 | `AI_PROVIDER` | Label for the chosen provider | Server configuration |
 | `AI_TIMEOUT_MS` | Provider response timeout, 1s–120s; default 45s | Server configuration |
@@ -374,7 +374,9 @@ Without `AI_API_KEY` and `AI_MODEL`, `GET /api/ai/itinerary` returns
 
 **Recommended provider:** Google AI Studio's Gemini free tier via its
 OpenAI-compatible endpoint — `AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/`,
-`AI_MODEL=gemini-2.0-flash`. Groq (`https://api.groq.com/openai/v1`),
+`AI_MODEL=gemini-3.8-flash`. Use a *current* model id: Gemini shuts old ones
+down (`gemini-2.0-flash` on 1 June 2026), and a retired id makes every draft
+fail with a 502. Groq (`https://api.groq.com/openai/v1`),
 OpenRouter and OpenAI all work with the same three variables, so switching
 providers never needs a code change.
 

@@ -530,7 +530,7 @@ export async function loadWorkspace(userId: string): Promise<WorkspaceState> {
     const splitRows = await all<SplitRow>(
       `select s.expense_id, s.user_id, s.share_minor
        from expense_splits s join expenses e on e.id = s.expense_id
-       where e.trip_id in (${placeholders}) order by s.rowid`,
+       where e.trip_id in (${placeholders}) order by s.expense_id, s.user_id`,
       ...tripIds,
     );
     const participants = new Map<string, string[]>();

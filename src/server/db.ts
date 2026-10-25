@@ -58,8 +58,18 @@ export function getPool(): Pool {
     }
     // Supabase requires TLS on the pooler endpoint. `require` is the mode the
     // dashboard hands out; verify-ca/verify-full keep full certificate checks.
+    // A copied URI often loses `?sslmode=require`, so any remote host defaults
+    // to TLS; only `sslmode=disable` (or a loopback host) turns it off.
     const sslMode = connectionString.match(/sslmode=([^&]+)/i)?.[1]?.toLowerCase();
-    const useSsl = Boolean(sslMode) && sslMode !== "disable";
+    let isLoopback = false;
+    try {
+      isLoopback = /^(localhost|127\.0\.0\.1|::1)$/i.test(
+        new URL(connectionString).hostname,
+      );
+    } catch {
+      // Not a parseable URL; let the driver report it.
+    }
+    const useSsl = sslMode ? sslMode !== "disable" : !isLoopback;
     pool = new Pool({
       connectionString,
       max: 8,

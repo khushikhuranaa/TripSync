@@ -18,6 +18,9 @@ declare global {
     AI_MAX_ATTEMPTS?: string;
     EMAIL_PROVIDER?: string;
     RESEND_API_KEY?: string;
+    /** Brevo transactional API key. Use with EMAIL_PROVIDER=brevo, which needs
+     * only a verified sender address (no domain). */
+    BREVO_API_KEY?: string;
     EMAIL_FROM?: string;
     /** Optional: provider endpoint override for development (https, or http for
      * loopback only). Defaults to https://api.resend.com. */

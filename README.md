@@ -364,7 +364,9 @@ these, but the server routes and database access do. Never commit real values.
 | `AI_PROVIDER` | Label for the chosen provider | Server configuration |
 | `AI_TIMEOUT_MS` | Provider response timeout, 1s–120s; default 45s | Server configuration |
 | `AI_MAX_ATTEMPTS` | Generation attempts per account per 10 minutes; default 6 | Server configuration |
-| `RESEND_API_KEY` | Invitation, password-reset and confirmation email | **Server only** |
+| `RESEND_API_KEY` | Invitation, password-reset and confirmation email (Resend) | **Server only** |
+| `BREVO_API_KEY` | Invitation, password-reset and confirmation email (Brevo) | **Server only** |
+| `EMAIL_PROVIDER` | `resend` (default) or `brevo` | Server configuration |
 | `EMAIL_FROM` | Verified sender address | Server configuration |
 | `GOOGLE_CLIENT_ID` | Sign in with Google (OAuth client) | Server configuration |
 | `GOOGLE_CLIENT_SECRET` | Sign in with Google (OAuth client) | **Server only** |
@@ -390,11 +392,18 @@ application, and add the authorised redirect URI
 Google" button is hidden and the social endpoint is not registered. Google
 accounts arrive with a pre-verified address.
 
-**Email verification becomes mandatory automatically** when
-`RESEND_API_KEY` + `EMAIL_FROM` are set: password sign-ups then cannot sign
+**Email verification becomes mandatory automatically** once a provider is
+configured (`EMAIL_PROVIDER=brevo` + `BREVO_API_KEY` + `EMAIL_FROM`, or
+`RESEND_API_KEY` + `EMAIL_FROM`): password sign-ups then cannot sign
 in until the confirmation link is opened (`requireEmailVerification` follows
 the email configuration — no separate switch). Unset, the app says plainly
 that mail is unavailable instead of pretending a message was sent.
+
+**Which mail provider.** Resend only sends from a domain you own and verify
+with DNS records, so it needs a real domain. Brevo verifies a single sender
+address (it emails a 6-digit code to that inbox), so email verification and
+invitations work with nothing but a Gmail address — 300 messages/day free.
+Either way the sender in `EMAIL_FROM` must be verified with that provider.
 
 ## 10. Verification performed
 
@@ -791,9 +800,10 @@ by `.gitignore` — verify before pushing).
 | `BETTER_AUTH_SECRET` | yes | `openssl rand -base64 32`; signs session cookies |
 | `BETTER_AUTH_URL` | yes | exact public origin, e.g. `https://tripsync.onrender.com` |
 | `DATABASE_PATH` | recommended | e.g. `/data/tripsync.sqlite` on a Render persistent disk |
-| `AI_PROVIDER`, `AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY` | for AI planner | any OpenAI-compatible endpoint; unset = planner reports "not configured" |
+| `AI_PROVIDER`, `AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY` | for AI planner | any OpenAI-compatible endpoint; `AI_MODEL` must be a **live** model id (Gemini retires ids — `gemini-2.0-flash` died 1 June 2026 and makes every draft 404); unset = planner reports "not configured" |
 | `AI_TIMEOUT_MS`, `AI_MAX_ATTEMPTS` | optional | provider timeout / per-user throttle overrides |
-| `RESEND_API_KEY`, `EMAIL_FROM` | recommended | real email + **mandatory verification** for password sign-ups; unset = invitations fall back to share links |
+| `EMAIL_PROVIDER`, `RESEND_API_KEY`, `EMAIL_FROM` | recommended | Resend (default): needs a verified **domain**. Real email + **mandatory verification** for password sign-ups; unset = invitations fall back to share links |
+| `EMAIL_PROVIDER=brevo`, `BREVO_API_KEY`, `EMAIL_FROM` | alternative | Brevo: needs only a verified **sender address** (no domain), 300/day free — same verification and invitation emails |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | for Google login | OAuth client with redirect URI `https://<your-domain>/api/auth/callback/google`; unset = button hidden |
 | `ADMIN_EMAIL` | optional | seed admin address (see section 11) |
 

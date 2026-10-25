@@ -424,40 +424,63 @@ async function requestDraft(
     .filter((line): line is string => Boolean(line))
     .join("\n");
 
-  let response: Response;
-  try {
-    response = await fetch(`${config.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: config.model,
-        temperature: input.scope === "activity" ? 0.9 : 0.7,
-        max_tokens:
-          input.scope === "activity" ? 500 : input.scope === "day" ? 1600 : 4000,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-      }),
-      signal: AbortSignal.timeout(config.timeoutMs),
-    });
-  } catch (error) {
-    if (error instanceof Error && error.name === "TimeoutError") {
+  // `response_format: json_object` is part of the OpenAI protocol, but not
+  // every compatible endpoint implements it: Gemini's compatibility layer
+  // answers 400 for some models. The prompt already demands JSON and the reply
+  // is parsed and validated below, so a 400 is answered with one retry without
+  // the flag instead of failing the whole draft.
+  let response: Response | null = null;
+  for (const useJsonMode of [true, false]) {
+    try {
+      response = await fetch(`${config.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: config.model,
+          temperature: input.scope === "activity" ? 0.9 : 0.7,
+          max_tokens:
+            input.scope === "activity" ? 500 : input.scope === "day" ? 1600 : 4000,
+          ...(useJsonMode ? { response_format: { type: "json_object" } } : {}),
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+        }),
+        signal: AbortSignal.timeout(config.timeoutMs),
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "TimeoutError") {
+        throw new AiRequestError(
+          504,
+          "The AI provider took too long to answer. Nothing was saved; please try again.",
+        );
+      }
+      // The name and message only: a provider URL can carry a key in its query
+      // string, so it is never logged.
+      console.error(
+        "[tripsync] AI provider fetch failed:",
+        error instanceof Error ? `${error.name}` : "unknown error",
+      );
       throw new AiRequestError(
-        504,
-        "The AI provider took too long to answer. Nothing was saved; please try again.",
+        502,
+        "The AI provider could not be reached. Please try again in a moment.",
       );
     }
-    // The name and message only: a provider URL can carry a key in its query
-    // string, so it is never logged.
-    console.error(
-      "[tripsync] AI provider fetch failed:",
-      error instanceof Error ? `${error.name}` : "unknown error",
-    );
+
+    if (response.ok) break;
+    if (useJsonMode && response.status === 400) {
+      console.warn(
+        "[tripsync] AI provider rejected JSON mode; retrying without response_format.",
+      );
+      continue;
+    }
+    break;
+  }
+
+  if (!response) {
     throw new AiRequestError(
       502,
       "The AI provider could not be reached. Please try again in a moment.",

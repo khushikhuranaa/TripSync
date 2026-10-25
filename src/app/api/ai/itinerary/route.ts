@@ -559,21 +559,43 @@ async function requestDraft(
     );
   }
 
-  // Some providers wrap JSON in a fenced block even when asked not to.
-  const cleaned = content
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/```$/, "")
-    .trim();
-
-  try {
-    return JSON.parse(cleaned);
-  } catch {
+  const parsed = parseJsonAnswer(content);
+  if (parsed === null) {
     throw new AiRequestError(
       502,
       "The AI provider returned something that was not valid JSON. Please try again.",
     );
   }
+  return parsed;
+}
+
+/**
+ * Best-effort extraction of a JSON value from a model's free-form reply.
+ *
+ * Models break the "return JSON only" rule in different ways: a fenced block
+ * anywhere in the text, or a sentence of prose around the object. Rather than
+ * rejecting the whole answer, pull the object out of it.
+ */
+function parseJsonAnswer(content: string): unknown | null {
+  const candidates: string[] = [];
+  const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced) candidates.push(fenced[1].trim());
+  candidates.push(content.trim());
+  const start = content.indexOf("{");
+  const end = content.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    candidates.push(content.slice(start, end + 1).trim());
+  }
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      return JSON.parse(candidate) as unknown;
+    } catch {
+      // try the next candidate
+    }
+  }
+  return null;
 }
 
 /** Keeps only usable suggestions and fixes small, unambiguous problems. */
@@ -801,7 +823,21 @@ export async function POST(request: Request) {
   }
 
   try {
-    const raw = await requestDraft(input, trip, provider);
+    // A malformed answer is a property of that particular generation, not of
+    // the request, so one fresh attempt usually repairs it before the caller
+    // is told anything went wrong.
+    let raw: unknown;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        raw = await requestDraft(input, trip, provider);
+        break;
+      } catch (error) {
+        const invalidJson =
+          error instanceof AiRequestError && error.message.includes("not valid JSON");
+        if (!invalidJson || attempt >= 2) throw error;
+        console.warn("[tripsync] AI answer was not valid JSON — regenerating once.");
+      }
+    }
     const scopeDays =
       input.scope === "day" && input.date
         ? [input.date]

@@ -372,6 +372,12 @@ these, but the server routes and database access do. Never commit real values.
 Without `AI_API_KEY` and `AI_MODEL`, `GET /api/ai/itinerary` returns
 `{"configured":false}` and generation answers with a clear 503 instead of sample text.
 
+**Recommended provider:** Google AI Studio's Gemini free tier via its
+OpenAI-compatible endpoint — `AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/`,
+`AI_MODEL=gemini-2.0-flash`. Groq (`https://api.groq.com/openai/v1`),
+OpenRouter and OpenAI all work with the same three variables, so switching
+providers never needs a code change.
+
 **Sign in with Google.** Create an OAuth client in Google Cloud Console →
 APIs & Services → Credentials → Credentials → OAuth client ID → Web
 application, and add the authorised redirect URI

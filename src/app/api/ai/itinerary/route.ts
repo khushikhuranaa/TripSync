@@ -429,55 +429,79 @@ async function requestDraft(
   // answers 400 for some models. The prompt already demands JSON and the reply
   // is parsed and validated below, so a 400 is answered with one retry without
   // the flag instead of failing the whole draft.
+  // Free-tier providers answer 502/503 while they are loaded, and those answer
+  // instantly — retrying them turns a flaky failure into a working draft.
+  // 429 is not retried: the caller is told to wait rather than hammering a
+  // quota that is already exhausted. Timeouts are not retried either, since a
+  // second wait would outlive the host's own request timeout.
+  const MAX_PROVIDER_ATTEMPTS = 3;
   let response: Response | null = null;
-  for (const useJsonMode of [true, false]) {
-    try {
-      response = await fetch(`${config.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: config.model,
-          temperature: input.scope === "activity" ? 0.9 : 0.7,
-          max_tokens:
-            input.scope === "activity" ? 500 : input.scope === "day" ? 1600 : 4000,
-          ...(useJsonMode ? { response_format: { type: "json_object" } } : {}),
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
-        }),
-        signal: AbortSignal.timeout(config.timeoutMs),
-      });
-    } catch (error) {
-      if (error instanceof Error && error.name === "TimeoutError") {
-        throw new AiRequestError(
-          504,
-          "The AI provider took too long to answer. Nothing was saved; please try again.",
-        );
-      }
-      // The name and message only: a provider URL can carry a key in its query
-      // string, so it is never logged.
-      console.error(
-        "[tripsync] AI provider fetch failed:",
-        error instanceof Error ? `${error.name}` : "unknown error",
-      );
-      throw new AiRequestError(
-        502,
-        "The AI provider could not be reached. Please try again in a moment.",
-      );
+
+  for (let attempt = 1; attempt <= MAX_PROVIDER_ATTEMPTS; attempt += 1) {
+    if (attempt > 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt - 1)));
     }
 
-    if (response.ok) break;
-    if (useJsonMode && response.status === 400) {
-      console.warn(
-        "[tripsync] AI provider rejected JSON mode; retrying without response_format.",
-      );
-      continue;
+    for (const useJsonMode of [true, false]) {
+      try {
+        response = await fetch(`${config.baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${config.apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: config.model,
+            temperature: input.scope === "activity" ? 0.9 : 0.7,
+            max_tokens:
+              input.scope === "activity" ? 500 : input.scope === "day" ? 1600 : 4000,
+            ...(useJsonMode ? { response_format: { type: "json_object" } } : {}),
+            messages: [
+              { role: "system", content: system },
+              { role: "user", content: user },
+            ],
+          }),
+          signal: AbortSignal.timeout(config.timeoutMs),
+        });
+      } catch (error) {
+        if (error instanceof Error && error.name === "TimeoutError") {
+          throw new AiRequestError(
+            504,
+            "The AI provider took too long to answer. Nothing was saved; please try again.",
+          );
+        }
+        // The name and message only: a provider URL can carry a key in its query
+        // string, so it is never logged.
+        console.error(
+          "[tripsync] AI provider fetch failed:",
+          error instanceof Error ? `${error.name}` : "unknown error",
+        );
+        throw new AiRequestError(
+          502,
+          "The AI provider could not be reached. Please try again in a moment.",
+        );
+      }
+
+      if (response.ok) break;
+      if (useJsonMode && response.status === 400) {
+        console.warn(
+          "[tripsync] AI provider rejected JSON mode; retrying without response_format.",
+        );
+        continue;
+      }
+      break;
     }
-    break;
+
+    if (!response) break;
+    if (response.ok) break;
+    const transient = response.status >= 500;
+    if (!transient || attempt === MAX_PROVIDER_ATTEMPTS) break;
+    console.warn(
+      "[tripsync] AI provider answered",
+      response.status,
+      `— attempt ${attempt} of ${MAX_PROVIDER_ATTEMPTS}.`,
+    );
+    await response.body?.cancel().catch(() => {});
   }
 
   if (!response) {
@@ -520,7 +544,7 @@ async function requestDraft(
     }
     throw new AiRequestError(
       502,
-      "The AI provider returned an error. Nothing was saved; please try again.",
+      `The AI provider returned an error (HTTP ${response.status}). Nothing was saved; please try again.`,
     );
   }
 

@@ -23,6 +23,11 @@ declare global {
      * loopback only). Defaults to https://api.resend.com. */
     EMAIL_API_BASE?: string;
     ADMIN_EMAIL?: string;
+    /** Google OAuth client for Sign in with Google (Google Cloud → Credentials).
+     * Both must be set together; the Google button stays hidden otherwise.
+     * Authorized redirect URI: <origin>/api/auth/callback/google */
+    GOOGLE_CLIENT_ID?: string;
+    GOOGLE_CLIENT_SECRET?: string;
   }
 }
 

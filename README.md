@@ -364,11 +364,29 @@ these, but the server routes and database access do. Never commit real values.
 | `AI_PROVIDER` | Label for the chosen provider | Server configuration |
 | `AI_TIMEOUT_MS` | Provider response timeout, 1s–120s; default 45s | Server configuration |
 | `AI_MAX_ATTEMPTS` | Generation attempts per account per 10 minutes; default 6 | Server configuration |
-| `RESEND_API_KEY` | Invitation and password-reset email | **Server only** |
+| `RESEND_API_KEY` | Invitation, password-reset and confirmation email | **Server only** |
 | `EMAIL_FROM` | Verified sender address | Server configuration |
+| `GOOGLE_CLIENT_ID` | Sign in with Google (OAuth client) | Server configuration |
+| `GOOGLE_CLIENT_SECRET` | Sign in with Google (OAuth client) | **Server only** |
 
 Without `AI_API_KEY` and `AI_MODEL`, `GET /api/ai/itinerary` returns
 `{"configured":false}` and generation answers with a clear 503 instead of sample text.
+
+**Sign in with Google.** Create an OAuth client in Google Cloud Console →
+APIs & Services → Credentials → Credentials → OAuth client ID → Web
+application, and add the authorised redirect URI
+`<origin>/api/auth/callback/google` (for local work:
+`http://localhost:3000/api/auth/callback/google`; for the deployed site:
+`https://<your-render-domain>/api/auth/callback/google`). While
+`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are unset the "Continue with
+Google" button is hidden and the social endpoint is not registered. Google
+accounts arrive with a pre-verified address.
+
+**Email verification becomes mandatory automatically** when
+`RESEND_API_KEY` + `EMAIL_FROM` are set: password sign-ups then cannot sign
+in until the confirmation link is opened (`requireEmailVerification` follows
+the email configuration — no separate switch). Unset, the app says plainly
+that mail is unavailable instead of pretending a message was sent.
 
 ## 10. Verification performed
 
@@ -767,7 +785,8 @@ by `.gitignore` — verify before pushing).
 | `DATABASE_PATH` | recommended | e.g. `/data/tripsync.sqlite` on a Render persistent disk |
 | `AI_PROVIDER`, `AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY` | for AI planner | any OpenAI-compatible endpoint; unset = planner reports "not configured" |
 | `AI_TIMEOUT_MS`, `AI_MAX_ATTEMPTS` | optional | provider timeout / per-user throttle overrides |
-| `RESEND_API_KEY`, `EMAIL_FROM` | optional | real email; unset = invitations fall back to share links |
+| `RESEND_API_KEY`, `EMAIL_FROM` | recommended | real email + **mandatory verification** for password sign-ups; unset = invitations fall back to share links |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | for Google login | OAuth client with redirect URI `https://<your-domain>/api/auth/callback/google`; unset = button hidden |
 | `ADMIN_EMAIL` | optional | seed admin address (see section 11) |
 
 Without a persistent disk the SQLite file is wiped on every redeploy. On a

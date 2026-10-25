@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/form";
 import { InlineNotice } from "@/components/ui/feedback";
 import { PasswordField } from "@/components/auth/password-field";
+import { GoogleButton } from "@/components/auth/google-button";
 import { authClient, authErrorMessage } from "@/lib/auth-client";
 import { safeNextPath } from "@/lib/session";
 
@@ -22,10 +23,13 @@ type Errors = Partial<Record<keyof Values, string>>;
 export function SignUpForm({
   next,
   verificationEnforced,
+  googleConfigured,
 }: {
   next: string;
   /** True only when this deployment can send mail; decides the next screen. */
   verificationEnforced?: boolean;
+  /** True only when Google OAuth credentials exist; gates the Google button. */
+  googleConfigured?: boolean;
 }) {
   const router = useRouter();
   const destination = safeNextPath(next);
@@ -163,6 +167,19 @@ export function SignUpForm({
         >
           {formError}
         </p>
+      )}
+
+      {googleConfigured && (
+        <>
+          <GoogleButton destination={destination} />
+          <div className="flex items-center gap-3" aria-hidden="true">
+            <span className="h-px flex-1 bg-clay-200" />
+            <span className="text-[11px] font-medium uppercase tracking-wide text-ink-400">
+              or
+            </span>
+            <span className="h-px flex-1 bg-clay-200" />
+          </div>
+        </>
       )}
 
       <Field id="sign-up-name" label="Your name" error={errors.name}>

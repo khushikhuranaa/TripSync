@@ -47,6 +47,15 @@ function authOptions(): BetterAuthOptions {
   // out of the product with no way to finish — so it stays off and the UI says
   // plainly that verification mail is unavailable.
   const emailConfigured = isEmailConfigured();
+  // Sign in with Google is only registered when this deployment actually has
+  // OAuth credentials, so a half-configured site never exposes a button (or
+  // an endpoint) that cannot complete a flow. Google-delivered accounts
+  // arrive with an already-verified address, so they are exempt from the
+  // confirmation email that password sign-ups need. Better Auth reads these
+  // from the top-level `socialProviders` option — that is what registers the
+  // provider with /api/auth/sign-in/social.
+  const googleClientId = env.GOOGLE_CLIENT_ID;
+  const googleClientSecret = env.GOOGLE_CLIENT_SECRET;
 
   // A published deployment must never fall back to the committed dev secret:
   // anyone who has read this file could forge session cookies. Fail loudly and
@@ -156,6 +165,11 @@ function authOptions(): BetterAuthOptions {
         },
       },
     },
+    socialProviders: {
+      ...(googleClientId && googleClientSecret
+        ? { google: { clientId: googleClientId, clientSecret: googleClientSecret } }
+        : {}),
+    },
     session: {
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24 * 7,
@@ -256,4 +270,14 @@ export async function getSessionUser(): Promise<SessionUser | null> {
  */
 export function isVerificationEnforced() {
   return isEmailConfigured();
+}
+
+/**
+ * True when this deployment can offer Sign in with Google. The sign-in and
+ * sign-up pages use it so the Google button only appears when it works; a
+ * missing pair of credentials hides the button instead of dead-ending.
+ */
+export function isGoogleConfigured() {
+  const env = getBindings();
+  return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
 }

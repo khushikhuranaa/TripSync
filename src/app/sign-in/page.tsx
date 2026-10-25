@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { SignInForm } from "@/components/auth/sign-in-form";
-import { getSessionUser, isVerificationEnforced } from "@/server/auth";
+import { getSessionUser, isGoogleConfigured, isVerificationEnforced } from "@/server/auth";
 import { safeNextPath } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +54,7 @@ export default async function SignInPage({
         next={next}
         notice={notice}
         verificationEnforced={isVerificationEnforced()}
+        googleConfigured={isGoogleConfigured()}
       />
     </AuthShell>
   );
